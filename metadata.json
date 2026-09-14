@@ -1,0 +1,6 @@
+{
+  "name": "WatchTogether",
+  "description": "Production-grade local video player with Media3 ExoPlayer, hardware decoding, MediaStore & SAF library, subtitle management, and resume playback.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
