@@ -18,7 +18,7 @@ const http = require('http');
 const crypto = require('crypto');
 const url = require('url');
 
-const PORT = parseInt(process.env.WATCHTOGETHER_PORT || (process.env.PORT && process.env.PORT !== '8080' ? process.env.PORT : '9090'), 10);
+const PORT = parseInt(process.env.PORT || '9090', 10);
 const ROOM_TTL_HOURS = parseInt(process.env.ROOM_TTL_HOURS || '24', 10);
 const MAX_PARTICIPANTS = 2; // Mode 1: Host and Viewer only
 
@@ -574,5 +574,5 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`WatchTogether Mode 1 Server running on port ${PORT}`);
+  console.log(`WatchTogether backend running on port ${PORT}`);
 });
