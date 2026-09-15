@@ -1,0 +1,16 @@
+{
+  "name": "watchtogether-backend",
+  "version": "1.0.0",
+  "description": "WatchTogether Mode 1 Signaling and Room Management Server",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node test/room.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "keywords": ["webrtc", "signaling", "websocket", "watchtogether", "video-sync"],
+  "author": "WatchTogether",
+  "license": "MIT"
+}

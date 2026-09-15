@@ -29,8 +29,14 @@ import com.example.presentation.player.PlayerScreen
 import com.example.presentation.settings.SettingsScreen
 import com.example.ui.theme.WatchTogetherTheme
 import com.example.utils.Formatters
+import com.example.watchtogether.ui.RoomCreatedScreen
+import com.example.watchtogether.ui.RoomSessionScreen
+import com.example.watchtogether.ui.WatchTogetherStartScreen
 
 sealed class AppDestination {
+    object WatchTogetherStart : AppDestination()
+    object RoomCreated : AppDestination()
+    object RoomSession : AppDestination()
     object Home : AppDestination()
     data class Player(val videoUri: String, val title: String, val startPositionMs: Long) : AppDestination()
     data class Folder(val folderName: String) : AppDestination()
@@ -39,7 +45,7 @@ sealed class AppDestination {
 
 class MainActivity : ComponentActivity() {
 
-    private var currentDestination by mutableStateOf<AppDestination>(AppDestination.Home)
+    private var currentDestination by mutableStateOf<AppDestination>(AppDestination.WatchTogetherStart)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,9 +61,58 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val homeViewModel = remember { app.createHomeViewModel() }
+                    val watchTogetherViewModel = remember { app.getOrCreateWatchTogetherViewModel() }
 
                     when (val dest = currentDestination) {
+                        is AppDestination.WatchTogetherStart -> {
+                            WatchTogetherStartScreen(
+                                viewModel = watchTogetherViewModel,
+                                onCreateRoomSuccess = {
+                                    currentDestination = AppDestination.RoomCreated
+                                },
+                                onJoinRoomSuccess = {
+                                    currentDestination = AppDestination.RoomSession
+                                },
+                                onNavigateToLocalVideos = {
+                                    currentDestination = AppDestination.Home
+                                }
+                            )
+                        }
+
+                        is AppDestination.RoomCreated -> {
+                            BackHandler {
+                                currentDestination = AppDestination.WatchTogetherStart
+                            }
+
+                            RoomCreatedScreen(
+                                viewModel = watchTogetherViewModel,
+                                onEnterSession = {
+                                    currentDestination = AppDestination.RoomSession
+                                },
+                                onCancel = {
+                                    currentDestination = AppDestination.WatchTogetherStart
+                                }
+                            )
+                        }
+
+                        is AppDestination.RoomSession -> {
+                            BackHandler {
+                                currentDestination = AppDestination.WatchTogetherStart
+                            }
+
+                            RoomSessionScreen(
+                                viewModel = watchTogetherViewModel,
+                                onLeaveSession = {
+                                    currentDestination = AppDestination.WatchTogetherStart
+                                }
+                            )
+                        }
+
                         is AppDestination.Home -> {
+                            BackHandler {
+                                currentDestination = AppDestination.WatchTogetherStart
+                            }
+
                             HomeScreen(
                                 viewModel = homeViewModel,
                                 onPlayVideo = { video, startPos ->
@@ -72,6 +127,9 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onNavigateSettings = {
                                     currentDestination = AppDestination.Settings
+                                },
+                                onNavigateWatchTogether = {
+                                    currentDestination = AppDestination.WatchTogetherStart
                                 }
                             )
                         }

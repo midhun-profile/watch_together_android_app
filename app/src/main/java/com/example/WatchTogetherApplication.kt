@@ -21,6 +21,10 @@ import com.example.domain.usecase.ToggleFavoriteUseCase
 import com.example.presentation.home.HomeViewModel
 import com.example.presentation.player.PlayerViewModel
 import com.example.presentation.settings.SettingsViewModel
+import com.example.watchtogether.room.RoomRepository
+import com.example.watchtogether.room.RoomRepositoryImpl
+import com.example.watchtogether.signaling.SignalingClient
+import com.example.watchtogether.ui.WatchTogetherViewModel
 
 class WatchTogetherApplication : Application() {
 
@@ -37,6 +41,12 @@ class WatchTogetherApplication : Application() {
         private set
 
     lateinit var playerPreferences: PlayerPreferences
+        private set
+
+    lateinit var roomRepository: RoomRepository
+        private set
+
+    lateinit var signalingClient: SignalingClient
         private set
 
     lateinit var getLibraryUseCase: GetLibraryUseCase
@@ -56,6 +66,7 @@ class WatchTogetherApplication : Application() {
 
     private var activeVideoPlayer: VideoPlayer? = null
     private var activePlayerViewModel: PlayerViewModel? = null
+    private var activeWatchTogetherViewModel: WatchTogetherViewModel? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -81,6 +92,8 @@ class WatchTogetherApplication : Application() {
         )
 
         playerPreferences = PlayerPreferences(this)
+        roomRepository = RoomRepositoryImpl()
+        signalingClient = SignalingClient()
 
         getLibraryUseCase = GetLibraryUseCase(videoRepository)
         scanVideosUseCase = ScanVideosUseCase(videoRepository)
@@ -118,6 +131,24 @@ class WatchTogetherApplication : Application() {
         return vm
     }
 
+    fun getOrCreateWatchTogetherViewModel(): WatchTogetherViewModel {
+        val existing = activeWatchTogetherViewModel
+        if (existing != null) return existing
+
+        // Ensure player is initialized
+        getOrCreatePlayerViewModel()
+        val player = activeVideoPlayer!!
+
+        val vm = WatchTogetherViewModel(
+            application = this,
+            roomRepository = roomRepository,
+            signalingClient = signalingClient,
+            videoPlayer = player
+        )
+        activeWatchTogetherViewModel = vm
+        return vm
+    }
+
     fun createSettingsViewModel(): SettingsViewModel {
         return SettingsViewModel(
             preferences = playerPreferences,
@@ -126,6 +157,8 @@ class WatchTogetherApplication : Application() {
     }
 
     fun releaseActivePlayer() {
+        activeWatchTogetherViewModel?.leaveRoom()
+        activeWatchTogetherViewModel = null
         activeVideoPlayer?.release()
         activeVideoPlayer = null
         activePlayerViewModel = null

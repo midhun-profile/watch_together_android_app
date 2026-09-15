@@ -18,6 +18,7 @@ val CinemaTextMuted = Color(0xFF64748B)
 
 val CinemaRed = Color(0xFFEF4444)
 val CinemaGreen = Color(0xFF10B981)
+val CinemaYellow = Color(0xFFF59E0B)
 
 val OverlayBackground = Color(0xCC050811)
 val ControlPillBackground = Color(0x991E293B)

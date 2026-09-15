@@ -30,6 +30,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.FileOpen
@@ -102,6 +103,7 @@ fun HomeScreen(
     onPlayVideo: (VideoItem, Long) -> Unit,
     onOpenFolder: (String) -> Unit,
     onNavigateSettings: () -> Unit,
+    onNavigateWatchTogether: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -256,6 +258,18 @@ fun HomeScreen(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Search",
                             tint = if (showSearchBar) CinemaCyan else CinemaTextPrimary
+                        )
+                    }
+
+                    // Watch Together
+                    IconButton(
+                        onClick = onNavigateWatchTogether,
+                        modifier = Modifier.testTag("watch_together_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Cast,
+                            contentDescription = "Watch Together",
+                            tint = CinemaCyan
                         )
                     }
 
