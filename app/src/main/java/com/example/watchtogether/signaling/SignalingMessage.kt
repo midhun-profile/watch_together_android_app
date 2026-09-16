@@ -25,6 +25,8 @@ data class SignalingMessage(
         const val TYPE_SEEK = "SEEK"
         const val TYPE_SYNC = "SYNC"
         const val TYPE_REQUEST_SYNC = "REQUEST_SYNC"
+        const val TYPE_REQUEST_PLAYBACK_STATE = "REQUEST_PLAYBACK_STATE"
+        const val TYPE_PLAYBACK_STATE = "PLAYBACK_STATE"
         const val TYPE_MEDIA_STARTED = "MEDIA_STARTED"
         const val TYPE_REQUEST_MEDIA = "REQUEST_MEDIA"
         const val TYPE_REQUEST_FILE = "REQUEST_FILE"
@@ -100,16 +102,55 @@ data class SignalingMessage(
             sequence: Long,
             positionMs: Long,
             isPlaying: Boolean,
-            playbackSpeed: Float
+            playbackSpeed: Float = 1.0f,
+            initialized: Boolean = true
         ): SignalingMessage {
             val payload = JSONObject().apply {
                 put("positionMs", positionMs)
                 put("isPlaying", isPlaying)
+                put("playing", isPlaying)
+                put("paused", !isPlaying)
+                put("currentTime", positionMs / 1000.0)
                 put("playbackSpeed", playbackSpeed.toDouble())
+                put("initialized", initialized)
                 put("sentAt", System.currentTimeMillis())
             }
             return SignalingMessage(
                 type = TYPE_SYNC,
+                roomCode = roomCode,
+                sequence = sequence,
+                payload = payload
+            )
+        }
+
+        fun createRequestPlaybackState(roomCode: String): SignalingMessage {
+            return SignalingMessage(
+                type = TYPE_REQUEST_PLAYBACK_STATE,
+                roomCode = roomCode,
+                payload = JSONObject()
+            )
+        }
+
+        fun createPlaybackState(
+            roomCode: String,
+            sequence: Long,
+            positionMs: Long,
+            isPlaying: Boolean,
+            playbackSpeed: Float = 1.0f,
+            initialized: Boolean = true
+        ): SignalingMessage {
+            val payload = JSONObject().apply {
+                put("positionMs", positionMs)
+                put("currentTime", positionMs / 1000.0)
+                put("isPlaying", isPlaying)
+                put("playing", isPlaying)
+                put("paused", !isPlaying)
+                put("playbackSpeed", playbackSpeed.toDouble())
+                put("initialized", initialized)
+                put("sentAt", System.currentTimeMillis())
+            }
+            return SignalingMessage(
+                type = TYPE_PLAYBACK_STATE,
                 roomCode = roomCode,
                 sequence = sequence,
                 payload = payload

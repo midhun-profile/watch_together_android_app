@@ -113,7 +113,7 @@ class WatchTogetherViewModel(
                 }
 
                 if (state.roomState == RoomState.ACTIVE && isReady) {
-                    if (!syncManager.isRemoteUpdate) {
+                    if (!syncManager.isRemoteUpdate && !syncManager.isInitializingVideo) {
                         if (playerState.isPlaying != lastIsPlaying) {
                             lastIsPlaying = playerState.isPlaying
                             if (playerState.isPlaying) {
@@ -317,6 +317,50 @@ class WatchTogetherViewModel(
         if (_uiState.value.participantConnected && uri != null && !uri.startsWith("http://") && !uri.startsWith("https://")) {
             fileTransferManager.startHostFileTransfer(roomCode)
         }
+    }
+
+    // Bidirectional User Playback Actions (Host and Viewer)
+    fun onUserPlay() {
+        Log.d("[SYNC]", "Local PLAY")
+        try {
+            videoPlayer.play()
+            Log.d("[VIDEO]", "play() succeeded")
+        } catch (e: Exception) {
+            Log.e("[VIDEO]", "play() rejected", e)
+        }
+        syncManager.onLocalPlay()
+    }
+
+    fun onUserPause() {
+        Log.d("[SYNC]", "Local PAUSE")
+        videoPlayer.pause()
+        syncManager.onLocalPause()
+    }
+
+    fun onUserTogglePlayPause() {
+        if (videoPlayer.state.value.isPlaying) {
+            onUserPause()
+        } else {
+            onUserPlay()
+        }
+    }
+
+    fun onUserSeek(targetPositionMs: Long) {
+        videoPlayer.seekTo(targetPositionMs)
+        syncManager.onLocalSeek(targetPositionMs)
+    }
+
+    fun onUserRewind10s() {
+        val current = videoPlayer.state.value.positionMs
+        val target = (current - 10000L).coerceAtLeast(0L)
+        onUserSeek(target)
+    }
+
+    fun onUserForward10s() {
+        val current = videoPlayer.state.value.positionMs
+        val duration = videoPlayer.state.value.durationMs
+        val target = if (duration > 0) (current + 10000L).coerceAtMost(duration) else current + 10000L
+        onUserSeek(target)
     }
 
     // SignalingListener Implementation

@@ -61,6 +61,7 @@ class RoomManager {
       viewerConnection: null,
       mediaInfo: null,
       lastPlaybackState: {
+        initialized: false,
         positionMs: 0,
         isPlaying: false,
         playbackSpeed: 1.0,
@@ -387,10 +388,17 @@ function handleIncomingMessage(client, msg) {
     case 'PAUSE':
     case 'SEEK':
     case 'SYNC':
+    case 'PLAYBACK_STATE':
       if (msg.payload) {
+        const isPlay = msgType === 'PLAY' ||
+          (msgType === 'PLAYBACK_STATE' && (msg.payload.isPlaying === true || msg.payload.playing === true || msg.payload.paused === false)) ||
+          (msgType === 'SYNC' && msg.payload.isPlaying === true);
+        const pos = msg.payload.positionMs ??
+          (msg.payload.targetPositionMs ?? (msg.payload.currentTime != null ? Math.round(msg.payload.currentTime * 1000) : 0));
         room.lastPlaybackState = {
-          positionMs: msg.payload.positionMs ?? (msg.payload.targetPositionMs || 0),
-          isPlaying: msgType === 'PLAY' || (msgType === 'SYNC' && msg.payload.isPlaying),
+          initialized: true,
+          positionMs: pos,
+          isPlaying: isPlay,
           playbackSpeed: msg.payload.playbackSpeed || 1.0,
           sequence: sequence,
           updatedAt: Date.now()
@@ -399,14 +407,31 @@ function handleIncomingMessage(client, msg) {
       if (otherClient) sendWsMessage(otherClient, msg);
       break;
 
+    case 'REQUEST_PLAYBACK_STATE':
     case 'REQUEST_SYNC':
-      console.log(`[REQUEST_SYNC] ${role} requested sync for room ${roomCode}`);
-      if (room.lastPlaybackState) {
+      console.log(`[${msgType}] ${role} requested sync for room ${roomCode}`);
+      if (room.lastPlaybackState && room.lastPlaybackState.initialized) {
+        sendWsMessage(client, {
+          type: 'PLAYBACK_STATE',
+          roomCode: roomCode,
+          sequence: room.lastPlaybackState.sequence,
+          payload: {
+            initialized: true,
+            currentTime: room.lastPlaybackState.positionMs / 1000.0,
+            positionMs: room.lastPlaybackState.positionMs,
+            paused: !room.lastPlaybackState.isPlaying,
+            isPlaying: room.lastPlaybackState.isPlaying,
+            playing: room.lastPlaybackState.isPlaying,
+            playbackSpeed: room.lastPlaybackState.playbackSpeed,
+            sentAt: Date.now()
+          }
+        });
         sendWsMessage(client, {
           type: 'SYNC',
           roomCode: roomCode,
           sequence: room.lastPlaybackState.sequence,
           payload: {
+            initialized: true,
             positionMs: room.lastPlaybackState.positionMs,
             isPlaying: room.lastPlaybackState.isPlaying,
             playbackSpeed: room.lastPlaybackState.playbackSpeed,

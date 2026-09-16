@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -40,6 +42,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -89,6 +93,7 @@ fun RoomSessionScreen(
     val uiState by viewModel.uiState.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
     val playerState by viewModel.videoPlayer.state.collectAsState()
+    val requiresUserInteraction by viewModel.syncManager.requiresUserInteraction.collectAsState()
     val activeRole = expectedRole ?: uiState.role ?: uiState.currentSession?.role ?: RoomRole.VIEWER
     val isHost = (activeRole == RoomRole.HOST) || uiState.isHost
     val context = LocalContext.current
@@ -431,6 +436,140 @@ fun RoomSessionScreen(
                                 color = CinemaTextSecondary,
                                 fontSize = 13.sp,
                                 modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Autoplay restriction prompt
+            if (requiresUserInteraction) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(CinemaPurple.copy(alpha = 0.25f))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Click Play to start synchronized playback",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Button(
+                        onClick = { viewModel.onUserPlay() },
+                        colors = ButtonDefaults.buttonColors(containerColor = CinemaPurple),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .height(36.dp)
+                            .testTag("autoplay_play_prompt")
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Play", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // Synchronized Playback Controls Bar
+            if (playerState.videoUri != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(CinemaSurfaceCard)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .testTag("synchronized_controls_bar")
+                ) {
+                    // Scrubber row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = formatTime(playerState.positionMs),
+                            color = CinemaTextSecondary,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.testTag("current_time_text")
+                        )
+                        val dur = playerState.durationMs.coerceAtLeast(1L)
+                        var sliderPosition by remember { mutableStateOf<Float?>(null) }
+                        Slider(
+                            value = sliderPosition ?: (playerState.positionMs.toFloat() / dur).coerceIn(0f, 1f),
+                            onValueChange = { sliderPosition = it },
+                            onValueChangeFinished = {
+                                sliderPosition?.let { fraction ->
+                                    val targetMs = (fraction * dur).toLong()
+                                    viewModel.onUserSeek(targetMs)
+                                }
+                                sliderPosition = null
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 8.dp)
+                                .testTag("seek_slider"),
+                            colors = SliderDefaults.colors(
+                                thumbColor = CinemaCyan,
+                                activeTrackColor = CinemaCyan,
+                                inactiveTrackColor = CinemaSurfaceVariant
+                            )
+                        )
+                        Text(
+                            text = formatTime(playerState.durationMs),
+                            color = CinemaTextSecondary,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.testTag("duration_time_text")
+                        )
+                    }
+
+                    // Transport controls: Rewind 10s, Play/Pause, Forward 10s
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { viewModel.onUserRewind10s() },
+                            modifier = Modifier.testTag("rewind_10s_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FastRewind,
+                                contentDescription = "Rewind 10s",
+                                tint = Color.White
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(20.dp))
+
+                        IconButton(
+                            onClick = { viewModel.onUserTogglePlayPause() },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(CinemaCyan)
+                                .testTag("play_pause_button")
+                        ) {
+                            Icon(
+                                imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (playerState.isPlaying) "Pause" else "Play",
+                                tint = Color.Black,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(20.dp))
+
+                        IconButton(
+                            onClick = { viewModel.onUserForward10s() },
+                            modifier = Modifier.testTag("forward_10s_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FastForward,
+                                contentDescription = "Forward 10s",
+                                tint = Color.White
                             )
                         }
                     }

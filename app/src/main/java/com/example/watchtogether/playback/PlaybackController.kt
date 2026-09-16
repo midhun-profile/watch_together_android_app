@@ -1,5 +1,6 @@
 package com.example.watchtogether.playback
 
+import android.util.Log
 import com.example.data.local.player.VideoPlayer
 
 /**
@@ -24,7 +25,12 @@ class ExistingPlayerAdapter(
 ) : PlaybackController {
 
     override fun play() {
-        videoPlayer.play()
+        try {
+            videoPlayer.play()
+            Log.d("[VIDEO]", "play() succeeded")
+        } catch (e: Exception) {
+            Log.e("[VIDEO]", "play() rejected", e)
+        }
     }
 
     override fun pause() {
