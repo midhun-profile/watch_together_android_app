@@ -245,6 +245,27 @@ fun RoomCreatedScreen(
                             fontSize = 14.sp
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Button(
+                        onClick = onEnterSession,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = CinemaCyan),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("start_movie_button")
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "START WATCHING",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    }
                 } else {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,

@@ -107,7 +107,6 @@ class Media3PlayerManager(
     override fun attachSurfaceView(playerView: PlayerView) {
         attachedPlayerView = playerView
         playerView.player = exoPlayer
-        playerView.useController = false
         applyResizeMode(_state.value.resizeMode)
     }
 

@@ -43,16 +43,31 @@ data class JoinRoomResponse(
     val expiresAt: String
 )
 
+enum class VideoReadinessState {
+    NO_SOURCE,
+    VIDEO_LOADING,
+    VIDEO_READY,
+    SYNCING,
+    PLAYING,
+    PAUSED
+}
+
 data class RoomUiState(
     val roomCode: String? = null,
     val role: RoomRole? = null,
+    val currentSession: RoomSession? = null,
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val roomState: RoomState = RoomState.IDLE,
     val participantConnected: Boolean = false,
     val mediaTitle: String? = null,
     val mediaDurationMs: Long = 0L,
+    val mediaUri: String? = null,
+    val videoState: VideoReadinessState = VideoReadinessState.NO_SOURCE,
     val errorMessage: String? = null,
-    val isHost: Boolean = role == RoomRole.HOST
+    val isTransferring: Boolean = false,
+    val transferProgress: Float = 0f,
+    val transferStatusText: String = "",
+    val isHost: Boolean = (role ?: currentSession?.role) == RoomRole.HOST
 )
 
 data class SyncUiState(

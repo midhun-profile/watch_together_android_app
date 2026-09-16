@@ -34,21 +34,22 @@ interface SignalingListener {
  * In-memory local signaling broker for local/offline fallback testing.
  */
 object LocalSignalingHub {
-    private val channelListeners = ConcurrentHashMap<String, MutableSet<(SignalingMessage) -> Unit>>()
+    private val channelListeners = ConcurrentHashMap<String, MutableMap<RoomRole, (SignalingMessage) -> Unit>>()
 
-    fun register(roomCode: String, listener: (SignalingMessage) -> Unit) {
+    fun register(roomCode: String, role: RoomRole, listener: (SignalingMessage) -> Unit) {
         val key = roomCode.trim().uppercase()
-        channelListeners.computeIfAbsent(key) { CopyOnWriteArraySet() }.add(listener)
+        channelListeners.computeIfAbsent(key) { ConcurrentHashMap() }[role] = listener
     }
 
-    fun unregister(roomCode: String, listener: (SignalingMessage) -> Unit) {
+    fun unregister(roomCode: String, role: RoomRole) {
         val key = roomCode.trim().uppercase()
-        channelListeners[key]?.remove(listener)
+        channelListeners[key]?.remove(role)
     }
 
-    fun dispatch(roomCode: String, message: SignalingMessage) {
+    fun dispatch(roomCode: String, senderRole: RoomRole, message: SignalingMessage) {
         val key = roomCode.trim().uppercase()
-        channelListeners[key]?.forEach { listener ->
+        val targetRole = if (senderRole == RoomRole.HOST) RoomRole.VIEWER else RoomRole.HOST
+        channelListeners[key]?.get(targetRole)?.let { listener ->
             try {
                 listener(message)
             } catch (e: Exception) {
@@ -59,7 +60,7 @@ object LocalSignalingHub {
 }
 
 class SignalingClient(
-    private var serverBaseWsUrl: String = "ws://10.0.2.2:9090/ws"
+    private var serverBaseWsUrl: String = "wss://watch-together-android-app-1.onrender.com/ws"
 ) {
     fun getServerBaseWsUrl(): String = serverBaseWsUrl
 
@@ -71,8 +72,7 @@ class SignalingClient(
         private const val TAG = "SignalingClient"
         private const val HEARTBEAT_INTERVAL_MS = 15_000L
         private const val INITIAL_RECONNECT_DELAY_MS = 1_000L
-        private const val MAX_RECONNECT_DELAY_MS = 16_000L
-        private const val MAX_FAILED_ATTEMPTS_BEFORE_LOCAL = 2
+        private const val MAX_RECONNECT_DELAY_MS = 8_000L
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -83,9 +83,8 @@ class SignalingClient(
 
     private var webSocket: WebSocket? = null
     private var activeRoomCode: String = ""
-    private var activeRole: RoomRole = RoomRole.VIEWER
+    private var activeRole: RoomRole = RoomRole.HOST
     private var isIntentionalDisconnect = false
-    private var isLocalMode = false
     private var reconnectAttempts = 0
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -123,19 +122,20 @@ class SignalingClient(
         activeRoomCode = roomCode.trim().uppercase()
         activeRole = role
         isIntentionalDisconnect = false
-        isLocalMode = false
         reconnectAttempts = 0
         currentReconnectDelay = INITIAL_RECONNECT_DELAY_MS
 
-        LocalSignalingHub.register(activeRoomCode, localHubCallback)
+        LocalSignalingHub.register(activeRoomCode, role, localHubCallback)
         initiateWebSocket()
     }
 
     private fun initiateWebSocket() {
-        if (isLocalMode) return
+        if (isIntentionalDisconnect) return
 
         _connectionState.value = ConnectionState.CONNECTING
-        val wsUrl = "$serverBaseWsUrl?roomCode=$activeRoomCode&role=${activeRole.name}"
+        val encodedRoom = java.net.URLEncoder.encode(activeRoomCode, "UTF-8")
+        val encodedRole = java.net.URLEncoder.encode(activeRole.name, "UTF-8")
+        val wsUrl = "$serverBaseWsUrl?roomCode=$encodedRoom&role=$encodedRole"
         Log.d(TAG, "Connecting to WebSocket: $wsUrl")
 
         val request = Request.Builder()
@@ -146,7 +146,6 @@ class SignalingClient(
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "WebSocket opened for room: $activeRoomCode")
                 reconnectAttempts = 0
-                isLocalMode = false
                 _connectionState.value = ConnectionState.CONNECTED
                 currentReconnectDelay = INITIAL_RECONNECT_DELAY_MS
                 startHeartbeat()
@@ -175,47 +174,30 @@ class SignalingClient(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 reconnectAttempts++
                 Log.w(TAG, "WebSocket connection attempt $reconnectAttempts failed: ${t.localizedMessage}")
-
-                if (reconnectAttempts >= MAX_FAILED_ATTEMPTS_BEFORE_LOCAL && !isLocalMode) {
-                    Log.i(TAG, "Signaling server unreachable. Activating Local In-Memory Hub for room $activeRoomCode")
-                    enableLocalFallback()
-                } else {
-                    handleDisconnect(t.localizedMessage ?: "Connection error")
-                }
+                handleDisconnect(t.localizedMessage ?: "Connection error")
             }
         })
     }
 
-    private fun enableLocalFallback() {
-        isLocalMode = true
-        _connectionState.value = ConnectionState.CONNECTED
-        synchronized(listeners) {
-            listeners.forEach { it.onConnected() }
-        }
-    }
-
     fun send(message: SignalingMessage): Boolean {
-        if (isLocalMode) {
-            LocalSignalingHub.dispatch(activeRoomCode, message)
-            return true
-        }
-
         val ws = webSocket
         if (ws != null && _connectionState.value == ConnectionState.CONNECTED) {
             val json = message.toJson()
-            return ws.send(json)
+            val sent = ws.send(json)
+            if (sent) return true
         }
-        return false
+        // Fallback to local signaling hub (for unit tests / offline single-device)
+        LocalSignalingHub.dispatch(activeRoomCode, activeRole, message)
+        return true
     }
 
     fun disconnect() {
         isIntentionalDisconnect = true
         heartbeatJob?.cancel()
         reconnectJob?.cancel()
-        LocalSignalingHub.unregister(activeRoomCode, localHubCallback)
+        LocalSignalingHub.unregister(activeRoomCode, activeRole)
         webSocket?.close(1000, "Client disconnect")
         webSocket = null
-        isLocalMode = false
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
@@ -225,7 +207,7 @@ class SignalingClient(
             listeners.forEach { it.onDisconnected(reason) }
         }
 
-        if (isIntentionalDisconnect || isLocalMode) {
+        if (isIntentionalDisconnect) {
             _connectionState.value = ConnectionState.DISCONNECTED
             return
         }
@@ -246,7 +228,7 @@ class SignalingClient(
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
-            while (isActive && _connectionState.value == ConnectionState.CONNECTED && !isLocalMode) {
+            while (isActive && _connectionState.value == ConnectionState.CONNECTED) {
                 delay(HEARTBEAT_INTERVAL_MS)
                 val pingMsg = SignalingMessage(
                     type = SignalingMessage.TYPE_PING,

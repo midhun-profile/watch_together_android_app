@@ -43,6 +43,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -75,18 +76,31 @@ import com.example.ui.theme.CinemaYellow
 import com.example.watchtogether.model.ConnectionState
 import com.example.watchtogether.model.RoomRole
 import com.example.watchtogether.model.RoomState
+import com.example.watchtogether.model.VideoReadinessState
 
 @Composable
 fun RoomSessionScreen(
     viewModel: WatchTogetherViewModel,
     onLeaveSession: () -> Unit,
+    expectedRole: RoomRole? = null,
     onOpenLocalPicker: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
-    val isHost = uiState.isHost
+    val playerState by viewModel.videoPlayer.state.collectAsState()
+    val activeRole = expectedRole ?: uiState.role ?: uiState.currentSession?.role ?: RoomRole.VIEWER
+    val isHost = (activeRole == RoomRole.HOST) || uiState.isHost
     val context = LocalContext.current
+
+    LaunchedEffect(expectedRole) {
+        if (expectedRole != null && uiState.role != expectedRole) {
+            val code = uiState.roomCode ?: ""
+            if (code.isNotEmpty()) {
+                viewModel.ensureSession(code, expectedRole)
+            }
+        }
+    }
 
     var showExitDialog by remember { mutableStateOf(false) }
 
@@ -98,8 +112,8 @@ fun RoomSessionScreen(
             val fileName = uri.lastPathSegment ?: "Movie"
             viewModel.videoPlayer.setMedia(uri, fileName, 0L)
             viewModel.videoPlayer.play()
-            viewModel.notifyMediaSelected(fileName, viewModel.videoPlayer.state.value.durationMs)
-            viewModel.syncManager.onHostPlay()
+            viewModel.notifyMediaSelected(fileName, viewModel.videoPlayer.state.value.durationMs, uri.toString())
+            viewModel.syncManager.onLocalPlay()
         }
     }
 
@@ -215,69 +229,87 @@ fun RoomSessionScreen(
                     .background(Color.Black),
                 contentAlignment = Alignment.Center
             ) {
-                if (isHost) {
-                    // HOST VIEW
-                    if (uiState.mediaTitle != null) {
-                        // Media is loaded: display existing PlayerView
-                        AndroidView(
-                            factory = { ctx ->
-                                PlayerView(ctx).apply {
-                                    useController = true
-                                    viewModel.videoPlayer.attachSurfaceView(this)
+                if (playerState.videoUri != null) {
+                    // Both Host and Viewer display active PlayerView with full controls
+                    AndroidView(
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                useController = true
+                                controllerShowTimeoutMs = 3000
+                                controllerHideOnTouch = true
+                                viewModel.videoPlayer.attachSurfaceView(this)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag(if (isHost) "host_player_view" else "viewer_player_view")
+                    )
+                } else if (isHost) {
+                    // Host hasn't picked a movie yet
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VideoFile,
+                            contentDescription = null,
+                            tint = CinemaCyan,
+                            modifier = Modifier.size(64.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Select a Movie to Watch",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "The movie will play on your device and synchronize playback in real-time with your friend.",
+                            color = CinemaTextSecondary,
+                            fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 24.dp)
+                        )
+                        Button(
+                            onClick = {
+                                if (onOpenLocalPicker != null) {
+                                    onOpenLocalPicker()
+                                } else {
+                                    videoPickerLauncher.launch("video/*")
                                 }
                             },
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .testTag("host_player_view")
-                        )
-                    } else {
-                        // Host hasn't picked a movie yet
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(24.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = CinemaCyan),
+                            modifier = Modifier.height(48.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.VideoFile,
-                                contentDescription = null,
-                                tint = CinemaCyan,
-                                modifier = Modifier.size(64.dp)
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "Select a Movie to Stream",
-                                color = Color.White,
-                                fontSize = 18.sp,
+                                text = "Choose Local Video",
+                                color = Color.Black,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        androidx.compose.material3.OutlinedButton(
+                            onClick = {
+                                val sampleUri = Uri.parse("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")
+                                val fileName = "Big Buck Bunny (Sample)"
+                                viewModel.videoPlayer.setMedia(sampleUri, fileName, 0L)
+                                viewModel.videoPlayer.play()
+                                viewModel.notifyMediaSelected(fileName, 596000L, sampleUri.toString())
+                                viewModel.syncManager.onLocalPlay()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.height(48.dp)
+                        ) {
                             Text(
-                                text = "The movie will play on your device and stream in real-time to your friend via WebRTC.",
-                                color = CinemaTextSecondary,
-                                fontSize = 13.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                modifier = Modifier.padding(top = 8.dp, bottom = 24.dp)
+                                text = "Play Demo Video",
+                                color = CinemaCyan,
+                                fontWeight = FontWeight.SemiBold
                             )
-                            Button(
-                                onClick = {
-                                    if (onOpenLocalPicker != null) {
-                                        onOpenLocalPicker()
-                                    } else {
-                                        videoPickerLauncher.launch("video/*")
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = CinemaCyan),
-                                modifier = Modifier.height(48.dp)
-                            ) {
-                                Text(
-                                    text = "Choose Local Video",
-                                    color = Color.Black,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
                         }
                     }
                 } else {
-                    // VIEWER VIEW
+                    // Viewer hasn't loaded video yet
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -286,7 +318,7 @@ fun RoomSessionScreen(
                         verticalArrangement = Arrangement.Center
                     ) {
                         if (uiState.mediaTitle != null) {
-                            // Active movie streaming from host
+                            // Host has selected movie
                             Card(
                                 shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.cardColors(containerColor = CinemaSurfaceCard),
@@ -295,18 +327,28 @@ fun RoomSessionScreen(
                                     .border(1.dp, CinemaPurple.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
                                     .padding(8.dp)
                             ) {
-                                Column(modifier = Modifier.padding(20.dp)) {
+                                Column(
+                                    modifier = Modifier.padding(20.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    val isTransferring = uiState.isTransferring
+                                    val isLoading = playerState.isLoading || uiState.videoState == VideoReadinessState.VIDEO_LOADING
+
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Box(
                                             modifier = Modifier
                                                 .size(10.dp)
                                                 .clip(CircleShape)
-                                                .background(if (syncState.isPlaying) CinemaGreen else CinemaYellow)
+                                                .background(if (isTransferring || isLoading) CinemaYellow else CinemaCyan)
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = if (syncState.isPlaying) "PLAYING (STREAMING)" else "PAUSED BY HOST",
-                                            color = if (syncState.isPlaying) CinemaGreen else CinemaYellow,
+                                            text = when {
+                                                isTransferring -> "RECEIVING VIDEO..."
+                                                isLoading -> "LOADING VIDEO..."
+                                                else -> "MOVIE READY TO SYNC"
+                                            },
+                                            color = if (isTransferring || isLoading) CinemaYellow else CinemaCyan,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -323,65 +365,50 @@ fun RoomSessionScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
 
-                                    Spacer(modifier = Modifier.height(16.dp))
-
-                                    // Timeline progress
-                                    val progress = if (syncState.durationMs > 0) {
-                                        (syncState.currentPositionMs.toFloat() / syncState.durationMs.toFloat()).coerceIn(0f, 1f)
-                                    } else 0f
-
-                                    LinearProgressIndicator(
-                                        progress = { progress },
-                                        color = CinemaCyan,
-                                        trackColor = CinemaSurfaceVariant,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(6.dp)
-                                            .clip(RoundedCornerShape(3.dp))
-                                    )
-
-                                    Spacer(modifier = Modifier.height(8.dp))
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            text = formatTime(syncState.currentPositionMs),
-                                            color = CinemaTextSecondary,
-                                            fontSize = 12.sp
+                                    if (isTransferring) {
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        LinearProgressIndicator(
+                                            progress = { uiState.transferProgress },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(8.dp)
+                                                .clip(RoundedCornerShape(4.dp)),
+                                            color = CinemaCyan,
+                                            trackColor = CinemaSurfaceVariant
                                         )
+                                        Spacer(modifier = Modifier.height(10.dp))
                                         Text(
-                                            text = formatTime(syncState.durationMs),
+                                            text = uiState.transferStatusText.ifEmpty { "Receiving video from host..." },
                                             color = CinemaTextSecondary,
-                                            fontSize = 12.sp
+                                            fontSize = 13.sp,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                         )
-                                    }
-
-                                    Spacer(modifier = Modifier.height(16.dp))
-
-                                    // Drift info pill
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(CinemaSurfaceVariant)
-                                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                imageVector = Icons.Default.Sync,
-                                                contentDescription = null,
-                                                tint = CinemaCyan,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = "Sync Drift: ±${syncState.driftMs}ms (Host Authoritative)",
-                                                color = CinemaCyan,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        }
+                                    } else if (isLoading) {
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        CircularProgressIndicator(
+                                            color = CinemaCyan,
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = "Preparing video playback...",
+                                            color = CinemaTextSecondary,
+                                            fontSize = 13.sp
+                                        )
+                                    } else {
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        CircularProgressIndicator(
+                                            color = CinemaCyan,
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = "Connecting video stream...",
+                                            color = CinemaTextSecondary,
+                                            fontSize = 13.sp
+                                        )
                                     }
                                 }
                             }
@@ -400,7 +427,7 @@ fun RoomSessionScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Waiting for host to choose and start a movie...",
+                                text = "Waiting for host to select and start a movie...",
                                 color = CinemaTextSecondary,
                                 fontSize = 13.sp,
                                 modifier = Modifier.padding(top = 4.dp)
@@ -422,42 +449,31 @@ fun RoomSessionScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (isHost) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = null,
-                                tint = CinemaCyan,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "You are the Host. Your playback controls the room.",
-                                color = CinemaTextSecondary,
-                                fontSize = 12.sp
-                            )
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Sync,
+                            contentDescription = null,
+                            tint = if (syncState.isInSync) CinemaGreen else CinemaYellow,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isHost) {
+                                "Host Mode • Play, pause, or seek to synchronize both screens"
+                            } else {
+                                "Viewer Mode • Play, pause, or seek to synchronize both screens"
+                            },
+                            color = CinemaTextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
 
-                        // Host button to change movie
+                    if (isHost) {
+                        // Only Host can select or change the movie
                         TextButton(
                             onClick = { videoPickerLauncher.launch("video/*") }
                         ) {
                             Text("Change Movie", color = CinemaCyan, fontSize = 12.sp)
-                        }
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Sync,
-                                contentDescription = null,
-                                tint = CinemaGreen,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Sync active. Playback is synchronized with the host.",
-                                color = CinemaTextSecondary,
-                                fontSize = 12.sp
-                            )
                         }
                     }
                 }

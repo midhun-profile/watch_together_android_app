@@ -191,11 +191,34 @@ function attachWebSocketClient(client) {
   const { socket, roomCode, role, id } = client;
   console.log(`[WS_CONNECT] Connection ${id} joined with role ${role} for room ${roomCode}`);
 
-  const room = roomManager.getRoom(roomCode);
+  let room = roomManager.getRoom(roomCode);
   if (!room) {
-    sendWsMessage(client, { type: 'ERROR', payload: { message: 'ROOM_NOT_FOUND' } });
-    setTimeout(() => socket.end(), 500);
-    return;
+    if (role === 'HOST' && roomCode && roomCode.length === 6) {
+      console.log(`[WS_RESTORE] Restoring room ${roomCode} for host`);
+      room = {
+        id: crypto.randomUUID(),
+        code: roomCode,
+        status: 'WAITING',
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        expiresAt: Date.now() + ROOM_TTL_HOURS * 3600 * 1000,
+        hostConnection: null,
+        viewerConnection: null,
+        mediaInfo: null,
+        lastPlaybackState: {
+          positionMs: 0,
+          isPlaying: false,
+          playbackSpeed: 1.0,
+          sequence: 0,
+          updatedAt: Date.now()
+        }
+      };
+      roomManager.rooms.set(roomCode, room);
+    } else {
+      sendWsMessage(client, { type: 'ERROR', payload: { message: 'ROOM_NOT_FOUND' } });
+      setTimeout(() => socket.end(), 500);
+      return;
+    }
   }
 
   // Register in room
@@ -334,9 +357,9 @@ function handleIncomingMessage(client, msg) {
     client.lastSequence = sequence;
   }
 
-  // Authoritative host rule: Viewer cannot change playback state
-  if (['PLAY', 'PAUSE', 'SEEK'].includes(msgType) && role !== 'HOST') {
-    console.log(`[SECURITY] Viewer rejected from broadcasting ${msgType}`);
+  // Only HOST can choose or change the movie
+  if (msgType === 'MEDIA_STARTED' && role !== 'HOST') {
+    console.log(`[SECURITY] Viewer rejected from broadcasting MEDIA_STARTED`);
     return;
   }
 
@@ -359,14 +382,14 @@ function handleIncomingMessage(client, msg) {
       if (otherClient) sendWsMessage(otherClient, msg);
       break;
 
-    // Playback sync
+    // Playback sync (Bidirectional: both Host and Viewer can play, pause, seek)
     case 'PLAY':
     case 'PAUSE':
     case 'SEEK':
     case 'SYNC':
       if (msg.payload) {
         room.lastPlaybackState = {
-          positionMs: msg.payload.positionMs || 0,
+          positionMs: msg.payload.positionMs ?? (msg.payload.targetPositionMs || 0),
           isPlaying: msgType === 'PLAY' || (msgType === 'SYNC' && msg.payload.isPlaying),
           playbackSpeed: msg.payload.playbackSpeed || 1.0,
           sequence: sequence,
@@ -376,14 +399,53 @@ function handleIncomingMessage(client, msg) {
       if (otherClient) sendWsMessage(otherClient, msg);
       break;
 
+    case 'REQUEST_SYNC':
+      console.log(`[REQUEST_SYNC] ${role} requested sync for room ${roomCode}`);
+      if (room.lastPlaybackState) {
+        sendWsMessage(client, {
+          type: 'SYNC',
+          roomCode: roomCode,
+          sequence: room.lastPlaybackState.sequence,
+          payload: {
+            positionMs: room.lastPlaybackState.positionMs,
+            isPlaying: room.lastPlaybackState.isPlaying,
+            playbackSpeed: room.lastPlaybackState.playbackSpeed,
+            sentAt: Date.now()
+          }
+        });
+      }
+      if (otherClient) sendWsMessage(otherClient, msg);
+      break;
+
     case 'MEDIA_STARTED':
-      // Host selected movie: broadcast metadata (never movie bytes)
+      // Host selected movie: broadcast metadata and URI
       room.mediaInfo = {
         name: msg.payload?.name || 'Movie',
-        durationMs: msg.payload?.durationMs || 0
+        durationMs: msg.payload?.durationMs || 0,
+        uri: msg.payload?.uri || '',
+        mimeType: msg.payload?.mimeType || 'video/mp4',
+        fileSize: msg.payload?.fileSize || 0
       };
       room.status = 'ACTIVE';
       console.log(`[MEDIA_STARTED] Host started movie ${room.mediaInfo.name} in room ${roomCode}`);
+      if (otherClient) sendWsMessage(otherClient, msg);
+      break;
+
+    case 'REQUEST_MEDIA':
+      console.log(`[REQUEST_MEDIA] ${role} requested media for room ${roomCode}`);
+      if (room.mediaInfo) {
+        sendWsMessage(client, {
+          type: 'MEDIA_STARTED',
+          roomCode: roomCode,
+          payload: room.mediaInfo
+        });
+      }
+      if (otherClient) sendWsMessage(otherClient, msg);
+      break;
+
+    case 'FILE_TRANSFER_START':
+    case 'FILE_TRANSFER_CHUNK':
+    case 'FILE_TRANSFER_COMPLETE':
       if (otherClient) sendWsMessage(otherClient, msg);
       break;
 
@@ -396,7 +458,11 @@ function handleIncomingMessage(client, msg) {
       break;
 
     default:
-      console.log(`[WS_UNKNOWN_TYPE] ${msgType}`);
+      if (otherClient) {
+        sendWsMessage(otherClient, msg);
+      } else {
+        console.log(`[WS_UNKNOWN_TYPE] ${msgType}`);
+      }
       break;
   }
 }

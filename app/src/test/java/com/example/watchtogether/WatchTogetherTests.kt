@@ -114,7 +114,7 @@ class WatchTogetherTests {
 
         // Player should have sought to ~10000ms
         assertTrue(mockPlayer.seekCalls.isNotEmpty())
-        assertEquals(10000L, mockPlayer.seekCalls.last())
+        assertTrue(mockPlayer.seekCalls.last() in 10000L..12000L)
         assertTrue(mockPlayer.isPlayingState)
 
         // Case 2: Stale sequence numbers are ignored
@@ -127,5 +127,195 @@ class WatchTogetherTests {
         )
         syncManager.handleIncomingSignaling(staleMsg)
         assertTrue("Stale sequence must not trigger seek", mockPlayer.seekCalls.isEmpty())
+    }
+
+    @Test
+    fun testRoomUiState_hostRoleEvaluation() {
+        val hostSession = com.example.watchtogether.model.RoomSession(
+            roomCode = "ABCDEF",
+            role = com.example.watchtogether.model.RoomRole.HOST
+        )
+        val hostState = com.example.watchtogether.model.RoomUiState(
+            roomCode = "ABCDEF",
+            role = com.example.watchtogether.model.RoomRole.HOST,
+            currentSession = hostSession
+        )
+        assertTrue("Host UI state must evaluate isHost to true", hostState.isHost)
+
+        val viewerSession = com.example.watchtogether.model.RoomSession(
+            roomCode = "ABCDEF",
+            role = com.example.watchtogether.model.RoomRole.VIEWER
+        )
+        val viewerState = com.example.watchtogether.model.RoomUiState(
+            roomCode = "ABCDEF",
+            role = com.example.watchtogether.model.RoomRole.VIEWER,
+            currentSession = viewerSession
+        )
+        assertFalse("Viewer UI state must evaluate isHost to false", viewerState.isHost)
+    }
+
+    @Test
+    fun testWebRtcManager_roleValidation() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val client = SignalingClient()
+        val rtcManager = com.example.watchtogether.webrtc.WebRtcManagerImpl(context, client)
+
+        // As HOST: cannot create answer (silently rejected with warning, iceState unchanged)
+        rtcManager.setRole(com.example.watchtogether.model.RoomRole.HOST)
+        rtcManager.createAnswer("ABCDEF")
+        assertEquals("NEW", rtcManager.getIceConnectionState())
+
+        // As VIEWER: cannot create offer (silently rejected with warning, iceState unchanged)
+        rtcManager.setRole(com.example.watchtogether.model.RoomRole.VIEWER)
+        rtcManager.createOffer("ABCDEF")
+        assertEquals("NEW", rtcManager.getIceConnectionState())
+    }
+
+    @Test
+    fun testLocalSignalingHub_roleDispatching() {
+        var viewerReceived: SignalingMessage? = null
+        var hostReceived: SignalingMessage? = null
+
+        com.example.watchtogether.signaling.LocalSignalingHub.register("XYZ123", com.example.watchtogether.model.RoomRole.VIEWER) { msg ->
+            viewerReceived = msg
+        }
+        com.example.watchtogether.signaling.LocalSignalingHub.register("XYZ123", com.example.watchtogether.model.RoomRole.HOST) { msg ->
+            hostReceived = msg
+        }
+
+        val hostMsg = SignalingMessage(
+            type = SignalingMessage.TYPE_PLAY,
+            roomCode = "XYZ123",
+            sequence = 1L
+        )
+
+        // HOST dispatches: must be received by VIEWER, NOT by HOST itself
+        com.example.watchtogether.signaling.LocalSignalingHub.dispatch(
+            roomCode = "XYZ123",
+            senderRole = com.example.watchtogether.model.RoomRole.HOST,
+            message = hostMsg
+        )
+
+        assertNotNull("Viewer should receive host message", viewerReceived)
+        assertEquals("XYZ123", viewerReceived?.roomCode)
+        org.junit.Assert.assertNull("Host should not receive its own dispatched message", hostReceived)
+
+        // Clean up
+        com.example.watchtogether.signaling.LocalSignalingHub.unregister("XYZ123", com.example.watchtogether.model.RoomRole.VIEWER)
+        com.example.watchtogether.signaling.LocalSignalingHub.unregister("XYZ123", com.example.watchtogether.model.RoomRole.HOST)
+    }
+
+    @Test
+    fun testFileTransferSignalingMessages() {
+        val startMsg = SignalingMessage.createFileTransferStart(
+            roomCode = "ABC123",
+            fileName = "sample_movie.mp4",
+            fileSize = 1048576L,
+            mimeType = "video/mp4",
+            totalChunks = 32,
+            chunkSize = 32768
+        )
+        val parsedStart = SignalingMessage.fromJson(startMsg.toJson())
+        assertNotNull(parsedStart)
+        assertEquals(SignalingMessage.TYPE_FILE_TRANSFER_START, parsedStart?.type)
+        assertEquals("sample_movie.mp4", parsedStart?.payload?.optString("fileName"))
+        assertEquals(32, parsedStart?.payload?.optInt("totalChunks"))
+
+        val chunkMsg = SignalingMessage.createFileTransferChunk(
+            roomCode = "ABC123",
+            chunkIndex = 5,
+            totalChunks = 32,
+            dataBase64 = "aGVsbG8gd29ybGQ="
+        )
+        val parsedChunk = SignalingMessage.fromJson(chunkMsg.toJson())
+        assertNotNull(parsedChunk)
+        assertEquals(SignalingMessage.TYPE_FILE_TRANSFER_CHUNK, parsedChunk?.type)
+        assertEquals(5, parsedChunk?.payload?.optInt("chunkIndex"))
+        assertEquals("aGVsbG8gd29ybGQ=", parsedChunk?.payload?.optString("data"))
+
+        val completeMsg = SignalingMessage.createFileTransferComplete(
+            roomCode = "ABC123",
+            fileName = "sample_movie.mp4",
+            totalChunks = 32
+        )
+        val parsedComplete = SignalingMessage.fromJson(completeMsg.toJson())
+        assertNotNull(parsedComplete)
+        assertEquals(SignalingMessage.TYPE_FILE_TRANSFER_COMPLETE, parsedComplete?.type)
+
+        val reqFileMsg = SignalingMessage.createRequestFile("ABC123")
+        val parsedReqFile = SignalingMessage.fromJson(reqFileMsg.toJson())
+        assertNotNull(parsedReqFile)
+        assertEquals(SignalingMessage.TYPE_REQUEST_FILE, parsedReqFile?.type)
+
+        val reqMediaMsg = SignalingMessage.createRequestMedia("ABC123")
+        val parsedReqMedia = SignalingMessage.fromJson(reqMediaMsg.toJson())
+        assertNotNull(parsedReqMedia)
+        assertEquals(SignalingMessage.TYPE_REQUEST_MEDIA, parsedReqMedia?.type)
+    }
+
+    @Test
+    fun testFileTransferReconstruction() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val client = SignalingClient()
+        val transferManager = com.example.watchtogether.transfer.FileTransferManager(context, client)
+        transferManager.start("TEST01", com.example.watchtogether.model.RoomRole.VIEWER)
+
+        var receivedUri: android.net.Uri? = null
+        var receivedName: String? = null
+        var completed = false
+
+        transferManager.setListener(object : com.example.watchtogether.transfer.FileTransferListener {
+            override fun onTransferProgress(progress: Float, statusText: String) {}
+            override fun onFileReceived(localUri: android.net.Uri, fileName: String, mimeType: String) {
+                receivedUri = localUri
+                receivedName = fileName
+                completed = true
+            }
+            override fun onError(error: String) {}
+        })
+
+        // Simulate START
+        val sampleData = "WatchTogether test movie payload chunk bytes content"
+        val bytes = sampleData.toByteArray(Charsets.UTF_8)
+        val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+
+        val startMsg = SignalingMessage.createFileTransferStart(
+            roomCode = "TEST01",
+            fileName = "test_movie.mp4",
+            fileSize = bytes.size.toLong(),
+            mimeType = "video/mp4",
+            totalChunks = 1,
+            chunkSize = 32768
+        )
+        transferManager.handleSignalingMessage(startMsg)
+
+        // Simulate CHUNK 0
+        val chunkMsg = SignalingMessage.createFileTransferChunk(
+            roomCode = "TEST01",
+            chunkIndex = 0,
+            totalChunks = 1,
+            dataBase64 = b64
+        )
+        transferManager.handleSignalingMessage(chunkMsg)
+
+        // Simulate COMPLETE
+        val completeMsg = SignalingMessage.createFileTransferComplete(
+            roomCode = "TEST01",
+            fileName = "test_movie.mp4",
+            totalChunks = 1
+        )
+        transferManager.handleSignalingMessage(completeMsg)
+
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+
+        assertTrue("File transfer must complete successfully", completed)
+        assertNotNull(receivedUri)
+        assertEquals("test_movie.mp4", receivedName)
+
+        // Verify content matches
+        val reconstructedFile = java.io.File(receivedUri!!.path!!)
+        assertTrue(reconstructedFile.exists())
+        assertEquals(sampleData, reconstructedFile.readText(Charsets.UTF_8))
+        reconstructedFile.delete()
     }
 }

@@ -29,14 +29,15 @@ import com.example.presentation.player.PlayerScreen
 import com.example.presentation.settings.SettingsScreen
 import com.example.ui.theme.WatchTogetherTheme
 import com.example.utils.Formatters
+import com.example.watchtogether.model.RoomRole
 import com.example.watchtogether.ui.RoomCreatedScreen
 import com.example.watchtogether.ui.RoomSessionScreen
 import com.example.watchtogether.ui.WatchTogetherStartScreen
 
 sealed class AppDestination {
     object WatchTogetherStart : AppDestination()
-    object RoomCreated : AppDestination()
-    object RoomSession : AppDestination()
+    data class RoomCreated(val roomCode: String) : AppDestination()
+    data class RoomSession(val roomCode: String, val role: RoomRole) : AppDestination()
     object Home : AppDestination()
     data class Player(val videoUri: String, val title: String, val startPositionMs: Long) : AppDestination()
     data class Folder(val folderName: String) : AppDestination()
@@ -67,11 +68,11 @@ class MainActivity : ComponentActivity() {
                         is AppDestination.WatchTogetherStart -> {
                             WatchTogetherStartScreen(
                                 viewModel = watchTogetherViewModel,
-                                onCreateRoomSuccess = {
-                                    currentDestination = AppDestination.RoomCreated
+                                onCreateRoomSuccess = { code ->
+                                    currentDestination = AppDestination.RoomCreated(code)
                                 },
-                                onJoinRoomSuccess = {
-                                    currentDestination = AppDestination.RoomSession
+                                onJoinRoomSuccess = { code ->
+                                    currentDestination = AppDestination.RoomSession(code, RoomRole.VIEWER)
                                 },
                                 onNavigateToLocalVideos = {
                                     currentDestination = AppDestination.Home
@@ -87,7 +88,8 @@ class MainActivity : ComponentActivity() {
                             RoomCreatedScreen(
                                 viewModel = watchTogetherViewModel,
                                 onEnterSession = {
-                                    currentDestination = AppDestination.RoomSession
+                                    val code = watchTogetherViewModel.uiState.value.roomCode ?: dest.roomCode
+                                    currentDestination = AppDestination.RoomSession(code, RoomRole.HOST)
                                 },
                                 onCancel = {
                                     currentDestination = AppDestination.WatchTogetherStart
@@ -102,6 +104,7 @@ class MainActivity : ComponentActivity() {
 
                             RoomSessionScreen(
                                 viewModel = watchTogetherViewModel,
+                                expectedRole = dest.role,
                                 onLeaveSession = {
                                     currentDestination = AppDestination.WatchTogetherStart
                                 }

@@ -71,8 +71,8 @@ import com.example.watchtogether.model.ConnectionState
 @Composable
 fun WatchTogetherStartScreen(
     viewModel: WatchTogetherViewModel,
-    onCreateRoomSuccess: () -> Unit,
-    onJoinRoomSuccess: () -> Unit,
+    onCreateRoomSuccess: (String) -> Unit,
+    onJoinRoomSuccess: (String) -> Unit,
     onNavigateToLocalVideos: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -185,8 +185,9 @@ fun WatchTogetherStartScreen(
                 Button(
                     onClick = {
                         focusManager.clearFocus()
-                        viewModel.createRoom()
-                        onCreateRoomSuccess()
+                        viewModel.createRoom { createdCode ->
+                            onCreateRoomSuccess(createdCode)
+                        }
                     },
                     enabled = !isBusy,
                     shape = RoundedCornerShape(14.dp),
@@ -286,8 +287,10 @@ fun WatchTogetherStartScreen(
                         onDone = {
                             if (enteredCode.length == 6) {
                                 focusManager.clearFocus()
-                                viewModel.joinRoom(enteredCode)
-                                onJoinRoomSuccess()
+                                val code = enteredCode.trim().uppercase()
+                                viewModel.joinRoom(code) {
+                                    onJoinRoomSuccess(code)
+                                }
                             }
                         }
                     ),
@@ -304,8 +307,10 @@ fun WatchTogetherStartScreen(
                     onClick = {
                         focusManager.clearFocus()
                         if (enteredCode.length == 6) {
-                            viewModel.joinRoom(enteredCode)
-                            onJoinRoomSuccess()
+                            val code = enteredCode.trim().uppercase()
+                            viewModel.joinRoom(code) {
+                                onJoinRoomSuccess(code)
+                            }
                         }
                     },
                     enabled = !isBusy && enteredCode.length == 6,

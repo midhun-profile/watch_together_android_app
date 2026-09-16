@@ -24,7 +24,13 @@ data class SignalingMessage(
         const val TYPE_PAUSE = "PAUSE"
         const val TYPE_SEEK = "SEEK"
         const val TYPE_SYNC = "SYNC"
+        const val TYPE_REQUEST_SYNC = "REQUEST_SYNC"
         const val TYPE_MEDIA_STARTED = "MEDIA_STARTED"
+        const val TYPE_REQUEST_MEDIA = "REQUEST_MEDIA"
+        const val TYPE_REQUEST_FILE = "REQUEST_FILE"
+        const val TYPE_FILE_TRANSFER_START = "FILE_TRANSFER_START"
+        const val TYPE_FILE_TRANSFER_CHUNK = "FILE_TRANSFER_CHUNK"
+        const val TYPE_FILE_TRANSFER_COMPLETE = "FILE_TRANSFER_COMPLETE"
 
         const val TYPE_PING = "PING"
         const val TYPE_PONG = "PONG"
@@ -110,15 +116,107 @@ data class SignalingMessage(
             )
         }
 
-        fun createMediaStarted(roomCode: String, name: String, durationMs: Long): SignalingMessage {
+        fun createMediaStarted(
+            roomCode: String,
+            name: String,
+            durationMs: Long,
+            uri: String? = null,
+            mimeType: String = "video/mp4",
+            fileSize: Long = 0L
+        ): SignalingMessage {
             val payload = JSONObject().apply {
                 put("name", name)
                 put("durationMs", durationMs)
+                if (uri != null) {
+                    put("uri", uri)
+                }
+                put("mimeType", mimeType)
+                put("fileSize", fileSize)
             }
             return SignalingMessage(
                 type = TYPE_MEDIA_STARTED,
                 roomCode = roomCode,
                 payload = payload
+            )
+        }
+
+        fun createRequestMedia(roomCode: String): SignalingMessage {
+            return SignalingMessage(
+                type = TYPE_REQUEST_MEDIA,
+                roomCode = roomCode,
+                payload = JSONObject()
+            )
+        }
+
+        fun createRequestFile(roomCode: String): SignalingMessage {
+            return SignalingMessage(
+                type = TYPE_REQUEST_FILE,
+                roomCode = roomCode,
+                payload = JSONObject()
+            )
+        }
+
+        fun createFileTransferStart(
+            roomCode: String,
+            fileName: String,
+            fileSize: Long,
+            mimeType: String,
+            totalChunks: Int,
+            chunkSize: Int
+        ): SignalingMessage {
+            val payload = JSONObject().apply {
+                put("fileName", fileName)
+                put("fileSize", fileSize)
+                put("mimeType", mimeType)
+                put("totalChunks", totalChunks)
+                put("chunkSize", chunkSize)
+            }
+            return SignalingMessage(
+                type = TYPE_FILE_TRANSFER_START,
+                roomCode = roomCode,
+                payload = payload
+            )
+        }
+
+        fun createFileTransferChunk(
+            roomCode: String,
+            chunkIndex: Int,
+            totalChunks: Int,
+            dataBase64: String
+        ): SignalingMessage {
+            val payload = JSONObject().apply {
+                put("chunkIndex", chunkIndex)
+                put("totalChunks", totalChunks)
+                put("data", dataBase64)
+            }
+            return SignalingMessage(
+                type = TYPE_FILE_TRANSFER_CHUNK,
+                roomCode = roomCode,
+                payload = payload
+            )
+        }
+
+        fun createFileTransferComplete(
+            roomCode: String,
+            fileName: String,
+            totalChunks: Int
+        ): SignalingMessage {
+            val payload = JSONObject().apply {
+                put("fileName", fileName)
+                put("totalChunks", totalChunks)
+            }
+            return SignalingMessage(
+                type = TYPE_FILE_TRANSFER_COMPLETE,
+                roomCode = roomCode,
+                payload = payload
+            )
+        }
+
+        fun createRequestSync(roomCode: String): SignalingMessage {
+            return SignalingMessage(
+                type = TYPE_REQUEST_SYNC,
+                roomCode = roomCode,
+                payload = JSONObject()
             )
         }
 

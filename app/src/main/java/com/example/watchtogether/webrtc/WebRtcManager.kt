@@ -2,6 +2,7 @@ package com.example.watchtogether.webrtc
 
 import android.content.Context
 import android.util.Log
+import com.example.watchtogether.model.RoomRole
 import com.example.watchtogether.signaling.SignalingClient
 import com.example.watchtogether.signaling.SignalingMessage
 import org.json.JSONObject
@@ -18,6 +19,7 @@ interface WebRtcListener {
  */
 interface WebRtcManager {
     fun setListener(listener: WebRtcListener?)
+    fun setRole(role: RoomRole)
     fun createOffer(roomCode: String)
     fun createAnswer(roomCode: String)
     fun setRemoteDescription(type: String, sdp: String)
@@ -41,6 +43,7 @@ class WebRtcManagerImpl(
     }
 
     private var listener: WebRtcListener? = null
+    private var activeRole: RoomRole = RoomRole.HOST
     private var iceState: String = "NEW"
     private var remoteDescriptionSet = false
     private val pendingIceCandidates = mutableListOf<JSONObject>()
@@ -50,7 +53,16 @@ class WebRtcManagerImpl(
         this.listener = listener
     }
 
+    override fun setRole(role: RoomRole) {
+        this.activeRole = role
+        Log.d(TAG, "WebRtcManager active role updated: $role")
+    }
+
     override fun createOffer(roomCode: String) {
+        if (activeRole != RoomRole.HOST) {
+            Log.w(TAG, "Cannot create offer as VIEWER")
+            return
+        }
         Log.d(TAG, "[WEBRTC_OFFER] Creating offer for room: $roomCode")
         iceState = "CHECKING"
         listener?.onIceConnectionState(iceState)
@@ -71,6 +83,10 @@ class WebRtcManagerImpl(
     }
 
     override fun createAnswer(roomCode: String) {
+        if (activeRole != RoomRole.VIEWER) {
+            Log.w(TAG, "Cannot create answer as HOST")
+            return
+        }
         Log.d(TAG, "[WEBRTC_ANSWER] Creating answer for room: $roomCode")
         iceState = "CHECKING"
         listener?.onIceConnectionState(iceState)

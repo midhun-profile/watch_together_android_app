@@ -26,7 +26,7 @@ interface RoomRepository {
 }
 
 class RoomRepositoryImpl(
-    private var serverBaseUrl: String = "http://10.0.2.2:9090"
+    private var serverBaseUrl: String = "https://watch-together-android-app-1.onrender.com"
 ) : RoomRepository {
 
     companion object {
@@ -36,8 +36,10 @@ class RoomRepositoryImpl(
     }
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     // Local fallback coordinator for peer/offline testing
@@ -51,6 +53,7 @@ class RoomRepositoryImpl(
     }
 
     override suspend fun createRoom(): Result<CreateRoomResponse> = withContext(Dispatchers.IO) {
+        var lastException: Exception? = null
         try {
             val request = Request.Builder()
                 .url("$serverBaseUrl/api/rooms")
@@ -68,31 +71,46 @@ class RoomRepositoryImpl(
                     role = RoomRole.HOST,
                     expiresAt = json.optString("expiresAt")
                 )
+                // Cache locally as well
+                localRooms[resp.roomCode] = RoomSession(
+                    roomCode = resp.roomCode,
+                    role = RoomRole.HOST,
+                    roomId = resp.roomId,
+                    expiresAt = resp.expiresAt
+                )
                 return@withContext Result.success(resp)
             } else {
-                Log.w(TAG, "Backend room create returned HTTP ${response.code}, falling back to local session")
+                Log.w(TAG, "Backend room create returned HTTP ${response.code}")
+                lastException = Exception("Server error (${response.code}). Please try again.")
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Backend unreachable (${e.message}), using local room engine")
+            Log.w(TAG, "Backend unreachable (${e.message})")
+            lastException = e
         }
 
-        // Offline / Local Room fallback generator (guarantees Mode 1 always works)
-        val generatedCode = generateLocalRoomCode()
-        val session = RoomSession(
-            roomCode = generatedCode,
-            role = RoomRole.HOST,
-            roomId = "local_${System.currentTimeMillis()}"
-        )
-        localRooms[generatedCode] = session
-
-        Result.success(
-            CreateRoomResponse(
-                roomId = session.roomId,
-                roomCode = session.roomCode,
+        // If server failed, check if we should return failure or local fallback
+        if (serverBaseUrl.startsWith("http://localhost") || serverBaseUrl.startsWith("http://127.0.0.1")) {
+            // Local development fallback
+            val generatedCode = generateLocalRoomCode()
+            val session = RoomSession(
+                roomCode = generatedCode,
                 role = RoomRole.HOST,
-                expiresAt = "24h"
+                roomId = "local_${System.currentTimeMillis()}"
             )
-        )
+            localRooms[generatedCode] = session
+
+            return@withContext Result.success(
+                CreateRoomResponse(
+                    roomId = session.roomId,
+                    roomCode = session.roomCode,
+                    role = RoomRole.HOST,
+                    expiresAt = "24h"
+                )
+            )
+        }
+
+        // Return clear failure to user rather than silent offline room
+        Result.failure(lastException ?: Exception("Failed to reach server. Please check internet connection."))
     }
 
     override suspend fun joinRoom(roomCode: String): Result<JoinRoomResponse> = withContext(Dispatchers.IO) {
@@ -101,6 +119,7 @@ class RoomRepositoryImpl(
             return@withContext Result.failure(IllegalArgumentException("Room code must be exactly 6 characters"))
         }
 
+        var networkError: Exception? = null
         try {
             val request = Request.Builder()
                 .url("$serverBaseUrl/api/rooms/$normalizedCode/join")
@@ -128,12 +147,15 @@ class RoomRepositoryImpl(
                 return@withContext Result.failure(Exception("Room is full. Maximum 2 participants allowed."))
             } else if (response.code == 410) {
                 return@withContext Result.failure(Exception("Room has expired."))
+            } else {
+                networkError = Exception("Server error (${response.code}).")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Backend unreachable (${e.message}), checking local coordinator")
+            networkError = e
         }
 
-        // Check local sessions
+        // Check local sessions (e.g. for offline or single-device tests)
         val local = localRooms[normalizedCode]
         if (local != null) {
             return@withContext Result.success(
@@ -146,15 +168,7 @@ class RoomRepositoryImpl(
             )
         }
 
-        // If local room was generated on this device or peer
-        Result.success(
-            JoinRoomResponse(
-                roomId = "peer_$normalizedCode",
-                roomCode = normalizedCode,
-                role = RoomRole.VIEWER,
-                expiresAt = "24h"
-            )
-        )
+        Result.failure(networkError ?: Exception("Room not found. Check the code and try again."))
     }
 
     override suspend fun getRoomStatus(roomCode: String): Result<JSONObject> = withContext(Dispatchers.IO) {
