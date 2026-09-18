@@ -122,6 +122,16 @@ fun RoomSessionScreen(
         }
     }
 
+    // System file picker for Viewer to select local copy of the movie
+    val viewerVideoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val fileName = uri.lastPathSegment ?: "Movie"
+            viewModel.onViewerSelectLocalMedia(uri, fileName)
+        }
+    }
+
     Scaffold(
         containerColor = CinemaBackground,
         modifier = modifier.fillMaxSize()
@@ -249,6 +259,72 @@ fun RoomSessionScreen(
                             .fillMaxSize()
                             .testTag(if (isHost) "host_player_view" else "viewer_player_view")
                     )
+
+                    // Error overlay if playback fails on Viewer or Host
+                    if (playerState.error != null || uiState.errorMessage != null) {
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = CinemaSurfaceCard.copy(alpha = 0.95f)),
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .border(1.dp, CinemaYellow.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = CinemaYellow,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Video Playback Notice",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                                Text(
+                                    text = playerState.error?.message ?: uiState.errorMessage ?: "Could not decode video file",
+                                    color = CinemaTextSecondary,
+                                    fontSize = 12.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    modifier = Modifier.padding(vertical = 6.dp)
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(top = 8.dp)
+                                ) {
+                                    if (!isHost) {
+                                        Button(
+                                            onClick = { viewModel.retryMediaRequest() },
+                                            colors = ButtonDefaults.buttonColors(containerColor = CinemaCyan),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text("Retry Transfer", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        Button(
+                                            onClick = { viewerVideoPickerLauncher.launch("video/*") },
+                                            colors = ButtonDefaults.buttonColors(containerColor = CinemaPurple),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text("Select Local File", color = Color.White, fontSize = 12.sp)
+                                        }
+                                    } else {
+                                        Button(
+                                            onClick = { videoPickerLauncher.launch("video/*") },
+                                            colors = ButtonDefaults.buttonColors(containerColor = CinemaCyan),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text("Pick Another Video", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } else if (isHost) {
                     // Host hasn't picked a movie yet
                     Column(
@@ -414,6 +490,28 @@ fun RoomSessionScreen(
                                             color = CinemaTextSecondary,
                                             fontSize = 13.sp
                                         )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = { viewerVideoPickerLauncher.launch("video/*") },
+                                            colors = ButtonDefaults.buttonColors(containerColor = CinemaPurple),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Icon(Icons.Default.VideoFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Select Local Copy", fontSize = 12.sp, color = Color.White)
+                                        }
+                                        Button(
+                                            onClick = { viewModel.retryMediaRequest() },
+                                            colors = ButtonDefaults.buttonColors(containerColor = CinemaSurfaceVariant),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Icon(Icons.Default.Sync, contentDescription = null, tint = CinemaCyan, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Resync", fontSize = 12.sp, color = CinemaCyan)
+                                        }
                                     }
                                 }
                             }
@@ -613,6 +711,23 @@ fun RoomSessionScreen(
                             onClick = { videoPickerLauncher.launch("video/*") }
                         ) {
                             Text("Change Movie", color = CinemaCyan, fontSize = 12.sp)
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(
+                                onClick = { viewModel.syncManager.requestSync() },
+                                modifier = Modifier.testTag("viewer_resync_button")
+                            ) {
+                                Icon(Icons.Default.Sync, contentDescription = null, tint = CinemaCyan, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Resync", color = CinemaCyan, fontSize = 12.sp)
+                            }
+                            TextButton(
+                                onClick = { viewerVideoPickerLauncher.launch("video/*") },
+                                modifier = Modifier.testTag("viewer_choose_video_button")
+                            ) {
+                                Text("Select Local Video", color = CinemaCyan, fontSize = 12.sp)
+                            }
                         }
                     }
                 }

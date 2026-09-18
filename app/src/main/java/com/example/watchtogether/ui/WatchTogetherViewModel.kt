@@ -73,13 +73,14 @@ class WatchTogetherViewModel(
                         isTransferring = false,
                         transferProgress = 1f,
                         transferStatusText = "Video ready",
-                        videoState = VideoReadinessState.VIDEO_LOADING
+                        videoState = VideoReadinessState.VIDEO_LOADING,
+                        errorMessage = null
                     )
                 }
                 syncManager.setVideoLoading()
                 Log.d("VIEWER", "Setting video source: $localUri")
                 videoPlayer.setMedia(localUri, fileName, 0L)
-                Log.d("VIEWER", "video.load()")
+                syncManager.requestSync()
             }
 
             override fun onError(error: String) {
@@ -105,11 +106,16 @@ class WatchTogetherViewModel(
             videoPlayer.state.collect { playerState ->
                 val state = _uiState.value
                 val isReady = !playerState.isLoading && playerState.durationMs > 0
+
+                if (playerState.error != null) {
+                    _uiState.update { it.copy(errorMessage = playerState.error.message ?: "Video decoding failed") }
+                }
+
                 if (isReady && !syncManager.isVideoReady()) {
                     Log.d("VIEWER", "loadedmetadata")
                     Log.d("VIEWER", "VIDEO_READY")
                     syncManager.onVideoReady()
-                    _uiState.update { it.copy(videoState = VideoReadinessState.VIDEO_READY) }
+                    _uiState.update { it.copy(videoState = VideoReadinessState.VIDEO_READY, errorMessage = null) }
                 }
 
                 if (state.roomState == RoomState.ACTIVE && isReady) {
@@ -446,15 +452,7 @@ class WatchTogetherViewModel(
                             )
                         }
                         if (_uiState.value.role == RoomRole.VIEWER) {
-                            syncManager.setVideoLoading()
-                            if (uri.startsWith("http://") || uri.startsWith("https://")) {
-                                Log.d("VIEWER", "Setting video source: $uri")
-                                videoPlayer.setMedia(android.net.Uri.parse(uri), name, 0L)
-                                Log.d("VIEWER", "video.load()")
-                            } else {
-                                Log.d("TRANSFER", "Requesting video file transfer from Host for $name")
-                                signalingClient.send(SignalingMessage.createRequestFile(roomCode))
-                            }
+                            loadViewerMedia(roomCode, name, uri)
                         }
                     }
                 }
@@ -564,15 +562,7 @@ class WatchTogetherViewModel(
                         )
                     }
                     if (_uiState.value.role == RoomRole.VIEWER) {
-                        syncManager.setVideoLoading()
-                        if (uri.startsWith("http://") || uri.startsWith("https://")) {
-                            Log.d("VIEWER", "Setting video source: $uri")
-                            videoPlayer.setMedia(android.net.Uri.parse(uri), name, 0L)
-                            Log.d("VIEWER", "video.load()")
-                        } else {
-                            Log.d("TRANSFER", "Requesting video file transfer from Host for $name")
-                            signalingClient.send(SignalingMessage.createRequestFile(roomCode))
-                        }
+                        loadViewerMedia(roomCode, name, uri)
                     }
                 }
             }
@@ -581,6 +571,76 @@ class WatchTogetherViewModel(
                 val err = message.payload.optString("message", "Error from server")
                 _uiState.update { it.copy(errorMessage = err) }
             }
+        }
+    }
+
+    private fun loadViewerMedia(roomCode: String, name: String, uri: String) {
+        syncManager.setVideoLoading()
+        if (uri.startsWith("http://") || uri.startsWith("https://")) {
+            Log.d("VIEWER", "Setting video source: $uri")
+            videoPlayer.setMedia(android.net.Uri.parse(uri), name, 0L)
+            syncManager.requestSync()
+        } else {
+            // Check if cached locally on this device/emulator first
+            val cached = fileTransferManager.getCachedSharedFile(roomCode)
+            if (cached != null && cached.exists() && cached.length() > 0L) {
+                Log.d("VIEWER", "Found cached local media file: ${cached.absolutePath}")
+                val localUri = android.net.Uri.fromFile(cached)
+                _uiState.update {
+                    it.copy(
+                        mediaTitle = name,
+                        mediaUri = localUri.toString(),
+                        isTransferring = false,
+                        transferProgress = 1f,
+                        transferStatusText = "Video ready",
+                        videoState = VideoReadinessState.VIDEO_LOADING,
+                        errorMessage = null
+                    )
+                }
+                videoPlayer.setMedia(localUri, name, 0L)
+                syncManager.requestSync()
+            } else {
+                Log.d("TRANSFER", "Requesting video file transfer from Host for $name")
+                _uiState.update {
+                    it.copy(
+                        isTransferring = true,
+                        transferProgress = 0f,
+                        transferStatusText = "Requesting video from host..."
+                    )
+                }
+                signalingClient.send(SignalingMessage.createRequestFile(roomCode))
+            }
+        }
+    }
+
+    fun onViewerSelectLocalMedia(uri: android.net.Uri, name: String) {
+        Log.d("VIEWER", "Viewer manually selected local video: $name")
+        _uiState.update {
+            it.copy(
+                mediaTitle = name,
+                mediaUri = uri.toString(),
+                videoState = VideoReadinessState.VIDEO_LOADING,
+                errorMessage = null
+            )
+        }
+        syncManager.setVideoLoading()
+        videoPlayer.setMedia(uri, name, 0L)
+        syncManager.requestSync()
+    }
+
+    fun retryMediaRequest() {
+        val roomCode = _uiState.value.roomCode ?: return
+        Log.d("VIEWER", "Viewer retrying media request for room $roomCode")
+        _uiState.update { it.copy(errorMessage = null) }
+        val cached = fileTransferManager.getCachedSharedFile(roomCode)
+        if (cached != null && cached.exists() && cached.length() > 0L) {
+            val localUri = android.net.Uri.fromFile(cached)
+            videoPlayer.setMedia(localUri, _uiState.value.mediaTitle ?: "Movie", 0L)
+            syncManager.requestSync()
+        } else {
+            signalingClient.send(SignalingMessage.createRequestMedia(roomCode))
+            signalingClient.send(SignalingMessage.createRequestFile(roomCode))
+            syncManager.requestSync()
         }
     }
 
