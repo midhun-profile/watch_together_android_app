@@ -2,6 +2,7 @@ package com.example.data.local.player
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -12,9 +13,14 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp4.Mp4Extractor
 import androidx.media3.session.MediaSession
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -83,7 +89,22 @@ class Media3PlayerManager(
             .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
             .build()
 
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("WatchTogether/1.0 (Linux; Android; Media3)")
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(20_000)
+            .setReadTimeoutMs(20_000)
+
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+
+        val extractorsFactory = DefaultExtractorsFactory()
+            .setConstantBitrateSeekingEnabled(true)
+            .setMp4ExtractorFlags(Mp4Extractor.FLAG_WORKAROUND_IGNORE_EDIT_LISTS)
+
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, extractorsFactory)
+
         val player = ExoPlayer.Builder(context, renderersFactory)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setTrackSelector(trackSelector)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
@@ -132,10 +153,28 @@ class Media3PlayerManager(
             .setDisplayTitle(currentMediaTitle)
             .build()
 
-        val mediaItem = MediaItem.Builder()
+        val uriString = uri.toString().lowercase()
+        val mimeType = when {
+            uriString.endsWith(".mp4") -> MimeTypes.VIDEO_MP4
+            uriString.endsWith(".mkv") -> MimeTypes.VIDEO_MATROSKA
+            uriString.endsWith(".webm") -> MimeTypes.VIDEO_WEBM
+            uriString.endsWith(".m3u8") -> MimeTypes.APPLICATION_M3U8
+            uriString.endsWith(".mpd") -> MimeTypes.APPLICATION_MPD
+            uri.scheme == "content" -> context.contentResolver.getType(uri)
+            else -> null
+        }
+
+        Log.d("Media3PlayerManager", "Setting media URI: $uri, detected MIME: $mimeType")
+
+        val mediaItemBuilder = MediaItem.Builder()
             .setUri(uri)
             .setMediaMetadata(metadata)
-            .build()
+
+        if (!mimeType.isNullOrEmpty()) {
+            mediaItemBuilder.setMimeType(mimeType)
+        }
+
+        val mediaItem = mediaItemBuilder.build()
 
         player.setMediaItem(mediaItem, startPositionMs)
         player.prepare()
@@ -458,6 +497,7 @@ class Media3PlayerManager(
 
         override fun onPlayerError(error: PlaybackException) {
             stopProgressLoop()
+            Log.e("Media3PlayerManager", "Playback error [${error.errorCode}]: ${error.message} - Cause: ${error.cause?.message}", error)
             val mappedError = when (error.errorCode) {
                 PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ->
                     PlayerError.DecoderError(error.localizedMessage)
@@ -467,9 +507,9 @@ class Media3PlayerManager(
                     PlayerError.MissingFile(error.localizedMessage)
                 PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
                 PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ->
-                    PlayerError.CorruptedFile(error.localizedMessage)
+                    PlayerError.CorruptedFile(error.cause?.localizedMessage ?: error.localizedMessage ?: "Unsupported video format")
                 else ->
-                    PlayerError.Unknown(error.localizedMessage ?: "Code: ${error.errorCode}")
+                    PlayerError.Unknown(error.cause?.localizedMessage ?: error.localizedMessage ?: "Code: ${error.errorCode}")
             }
 
             _state.update {

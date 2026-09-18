@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.VideoFile
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -44,6 +45,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -236,6 +238,46 @@ fun RoomSessionScreen(
                 }
             }
 
+            if (uiState.errorMessage != null) {
+                Surface(
+                    color = CinemaRed.copy(alpha = 0.2f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Error",
+                            tint = CinemaRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = uiState.errorMessage ?: "",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { viewModel.clearError() },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Dismiss",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
             // Main Content Area: Video Player / Stream Display
             Box(
                 modifier = Modifier
@@ -372,11 +414,11 @@ fun RoomSessionScreen(
                         Spacer(modifier = Modifier.height(12.dp))
                         androidx.compose.material3.OutlinedButton(
                             onClick = {
-                                val sampleUri = Uri.parse("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")
-                                val fileName = "Big Buck Bunny (Sample)"
+                                val sampleUri = Uri.parse("https://media.w3.org/2010/05/sintel/trailer.mp4")
+                                val fileName = "Sintel Trailer (Sample)"
                                 viewModel.videoPlayer.setMedia(sampleUri, fileName, 0L)
                                 viewModel.videoPlayer.play()
-                                viewModel.notifyMediaSelected(fileName, 596000L, sampleUri.toString())
+                                viewModel.notifyMediaSelected(fileName, 52200L, sampleUri.toString())
                                 viewModel.syncManager.onLocalPlay()
                             },
                             shape = RoundedCornerShape(12.dp),

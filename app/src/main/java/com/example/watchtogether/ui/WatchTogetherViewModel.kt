@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.player.VideoPlayer
+import com.example.domain.model.PlayerError
 import com.example.watchtogether.model.ConnectionState
 import com.example.watchtogether.model.RoomRole
 import com.example.watchtogether.model.RoomSession
@@ -104,6 +105,23 @@ class WatchTogetherViewModel(
         var lastPositionMs = 0L
         viewModelScope.launch {
             videoPlayer.state.collect { playerState ->
+                if (playerState.error != null) {
+                    val errMsg = when (val err = playerState.error) {
+                        is PlayerError.CorruptedFile -> "Cannot play video: format or stream unsupported."
+                        is PlayerError.MissingFile -> "Video file not found or inaccessible."
+                        is PlayerError.UnsupportedCodec -> "Unsupported video codec on this device."
+                        is PlayerError.DecoderError -> "Hardware decoder error."
+                        is PlayerError.Unknown -> "Video playback error: ${err.message}"
+                        else -> "Video playback error occurred."
+                    }
+                    _uiState.update {
+                        it.copy(
+                            errorMessage = errMsg,
+                            videoState = VideoReadinessState.NO_SOURCE
+                        )
+                    }
+                }
+
                 val state = _uiState.value
                 val isReady = !playerState.isLoading && playerState.durationMs > 0
 
